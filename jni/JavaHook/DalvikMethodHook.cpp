@@ -2,7 +2,7 @@
 
 #include "JavaMethodHook.h"
 #include "common.h"
-#include "dvm.h"
+#include "dvm_func.h"
 
 using android::AndroidRuntime;
 
@@ -138,6 +138,10 @@ STATIC int dvmComputeJniArgInfo(const char* shorty) {
 STATIC jclass dvmFindJNIClass(JNIEnv *env,const char *classDesc){
 	jclass classObj = env->FindClass(classDesc);
 
+	if(env->ExceptionCheck() == JNI_TRUE){
+		env->ExceptionClear();
+	}
+
 	if(classObj == NULL){
 		jclass clazzApplicationLoaders = env->FindClass("android/app/ApplicationLoaders");
 		CHECK_VALID(clazzApplicationLoaders);
@@ -187,6 +191,7 @@ STATIC ClassObject* dvmFindClass(const char *classDesc){
 
 	jclass jnicls = dvmFindJNIClass(env, newclassDesc);
 	ClassObject *res = jnicls ? static_cast<ClassObject*>(dvmDecodeIndirectRef(dvmThreadSelf(), jnicls)) : NULL;
+	env->DeleteGlobalRef(jnicls);
 	free(newclassDesc);
 	return res;
 }
@@ -318,12 +323,12 @@ STATIC ArrayObject* dvmGetMethodParamTypes(const Method* method, const char* met
 
 STATIC void method_handler(const u4* args, JValue* pResult, const Method* method, struct Thread* self){
 	HookInfo* info = (HookInfo*)method->insns;
-	LOGI("entry %s->%s", info->classDesc, info->methodName);
+	LOGI("[+] entry DvmHandler %s->%s", info->classDesc, info->methodName);
 
 	Method* originalMethod = reinterpret_cast<Method*>(info->originalMethod);
-	Object* thisObject = (Object*)args[0];
+	Object* thisObject = !info->isStaticMethod ? (Object*)args[0]: NULL;
 
-	ArrayObject* argTypes = dvmBoxMethodArgs(originalMethod, args + 1);
+	ArrayObject* argTypes = dvmBoxMethodArgs(originalMethod, info->isStaticMethod ? args : args + 1);
 	pResult->l = (void *)dvmInvokeMethod(thisObject, originalMethod, argTypes, (ArrayObject *)info->paramTypes, (ClassObject *)info->returnType, true);
 
 	dvmReleaseTrackedAlloc((Object *)argTypes, self);
